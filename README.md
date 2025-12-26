@@ -48,7 +48,7 @@ pip install numpy opencv-python torch
 ## Inputs & Parameters (as exposed in the node)
 
 - image (IMAGE) — input image tensor(s) (ComfyUI IMAGE)
-- film_type (select) — choose from presets listed in `films.json` (default: `FJ CN200` fallback)
+- film_type (select) — choose from presets listed in `films.json` (default: with `Default Film` fallback)
 - tone_mapping (select) — `filmic` (default), `reinhard`, `none`
 - exposure (FLOAT) — manual EV compensation, range roughly -3.0 .. +3.0 (adds to preset `exposure_bias`)
 - grain_factor (FLOAT) — global multiplier for grain strength (default 1.0)
