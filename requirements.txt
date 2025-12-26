@@ -1,0 +1,5 @@
+numpy
+opencv-python
+# torch installation depends on platform (CPU/GPU). For most users:
+# pip install torch --index-url https://download.pytorch.org/whl/cpu
+# Or follow instructions at https://pytorch.org to get the proper wheel for your system.

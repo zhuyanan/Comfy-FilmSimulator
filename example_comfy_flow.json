@@ -1,0 +1,31 @@
+{
+  "format": "ComfyUI_example_v1",
+  "description": "Minimal example flow demonstrating FilmSim node usage. Replace the ImageLoader/Saver nodes with your actual ComfyUI nodes when importing.",
+  "nodes": [
+    {
+      "id": "image_loader",
+      "type": "ImageLoader",
+      "params": { "path": "input.jpg" }
+    },
+    {
+      "id": "filmsim",
+      "type": "FilmSimNode",
+      "params": {
+        "film_type": "Kodak Portra 400",
+        "tone_mapping": "filmic",
+        "exposure": 0.0,
+        "grain_factor": 1.0,
+        "halation_factor": 1.0
+      }
+    },
+    {
+      "id": "saver",
+      "type": "ImageSaver",
+      "params": { "path": "output.jpg" }
+    }
+  ],
+  "connections": [
+    { "from": "image_loader", "out": "image", "to": "filmsim", "in": "image" },
+    { "from": "filmsim", "out": "image", "to": "saver", "in": "image" }
+  ]
+}
