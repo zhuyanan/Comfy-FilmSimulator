@@ -23,7 +23,7 @@ def load_presets():
     
     # 默认回退预设
     default_presets = {
-        "NC200 (Fuji C200 style)": {
+        "FJ CN200": {
             "type": "color",
             "matrix": [0.77, 0.12, 0.18, 0.08, 0.85, 0.23, 0.08, 0.09, 0.92, 0.25, 0.35, 0.35],
             "sens_factor": 1.20,
