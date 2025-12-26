@@ -71,16 +71,16 @@ Return: processed IMAGE tensor.
   - Cross-talk mixes grain between channels to simulate analog film interactions.
 - Optical effects:
   - Bloom/halation applied with configurable radii derived from image size and sensitivity factor.
-  - Simple vignette/optical weighting parameters present in presets.
+  - Split toneing for shadow/highlight weighting parameters present in presets.
 - Presets:
-  - `films.json` contains many stocks with `type`, `matrix`, `sens_factor`, `grain_base`, `opt_*` and `curve` values.
+  - `films.json` contains many stocks film presets values.
 
 ---
 
 ## Example usage (within ComfyUI)
 
 1. Add an image source node.
-2. Add the "Film Simulation V3 (Adaptive)" node (category: FilmSim/Film).
+2. Add the "Film Simulation" node (category: FilmSim/Film).
 3. Connect the image output to the `image` input on the FilmSim node.
 4. Select a `film_type` (e.g. "Kodak Portra 400"), choose `filmic` or `reinhard` tone mapping.
 5. Tweak `exposure`, `grain_factor` and `halation_factor` to taste.
@@ -98,6 +98,7 @@ Return: processed IMAGE tensor.
   - `grain_base`: base grain strength for R/G/B/L channels and cross-talk factor
   - `opt_r/opt_g/opt_b` or `opt_l`: per-channel optical composition coefficients
   - `curve`: tone mapping parameters {A, B, C, D, E, F, gamma, exposure_bias}
+  - `tint`: shadow/highlight color tinting values
 - To create a new preset: copy an existing block, adjust parameters, save, and restart ComfyUI.
 
 ---
@@ -129,6 +130,6 @@ This repository contains a `LICENSE` file — please refer to it for terms. (The
 
 ## Attribution & Contact
 
-Maintainer: zhuyanan  
+Maintainer: yanan.zhu@gmail.com  
 Repo: https://github.com/zhuyanan/Comfy-FilmSimulator
 
