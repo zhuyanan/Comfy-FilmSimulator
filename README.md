@@ -132,9 +132,3 @@ This repository contains a `LICENSE` file — please refer to it for terms. (The
 Maintainer: zhuyanan  
 Repo: https://github.com/zhuyanan/Comfy-FilmSimulator
 
-If you'd like, I can:
-- Push this README into the repository as a pull request.
-- Add a short `requirements.txt`, or a simple example flow file for ComfyUI to demonstrate the node.
-- Create a minimal `tests/visual` folder with before/after reference images and a short test script.
-
-Tell me which step you'd like next and I will prepare the changes.
