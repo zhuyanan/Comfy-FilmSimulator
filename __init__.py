@@ -23,15 +23,25 @@ def load_presets():
     
     # 默认回退预设
     default_presets = {
-        "FJ CN200": {
+        "Default Film": {
             "type": "color",
-            "matrix": [0.77, 0.12, 0.18, 0.08, 0.85, 0.23, 0.08, 0.09, 0.92, 0.25, 0.35, 0.35],
+            "matrix": [
+                0.88, 0.02, 0.10, 
+                0.08, 0.85, 0.23, 
+                0.08, 0.09, 0.92, 
+                0.30, 0.30, 0.35
+                ],
             "sens_factor": 1.20,
-            "grain_base": [0.18, 0.18, 0.18, 0.08],
-            "opt_r": [1.0, 1.0, 1.0],
-            "opt_g": [1.0, 1.0, 1.0],
-            "opt_b": [1.0, 1.0, 1.0],
-            "curve": {"A": 0.15, "B": 0.50, "C": 0.10, "D": 0.20, "E": 0.02, "F": 0.30, "gamma": 2.05, "exposure_bias": 0.0}
+            "grain_base": [0.18, 0.18, 0.18, 0.04],
+            "opt_r": [1.0, 1.0, 1.1],
+            "opt_g": [1.0, 1.0, 1.1],
+            "opt_b": [1.0, 1.0, 1.1],
+            "curve": {"A": 0.15, "B": 0.50, "C": 0.10, "D": 0.20, "E": 0.02, "F": 0.30, "gamma": 2.05, "exposure_bias": 0.0},
+            "tint": {
+                "shadows": [-0.02, 0.0, 0.02],
+                "highlights": [0.02, 0.01, -0.01],
+                "range": 2.0
+            }
         }
     }
 
@@ -50,10 +60,12 @@ FILM_PRESETS = load_presets()
 
 class FilmSimNode:
     """
-    Film Simulation for ComfyUI (Adaptive V3)
+    Film Simulation for ComfyUI (Adaptive V1.1)
     - Adaptive Mid-Gray Anchor: Brightness doesn't drift with Gamma.
     - Matte Look: Black/White point mapped to 0.02 - 0.98.
     - Exposure Control: Node parameter + JSON bias.
+    - Responsive Grain & Halation: Based on image luminance.
+    - Split Toning: Shadow/Highlight color tinting.
     """
 
     def __init__(self):
@@ -62,7 +74,7 @@ class FilmSimNode:
     @classmethod
     def INPUT_TYPES(s):
         film_list = list(FILM_PRESETS.keys())
-        default_film = "NC200 (Fuji C200 style)"
+        default_film = "Default Film"
         if default_film not in film_list and len(film_list) > 0:
             default_film = film_list[0]
 
@@ -191,6 +203,40 @@ class FilmSimNode:
         
         return normalized * (target_white - target_black) + target_black
 
+    def apply_split_toning(self, r, g, b, tint_data):
+        if not tint_data:
+            return r, g, b
+            
+        # 获取参数，默认为空
+        s_rgb = tint_data.get("shadows", [0, 0, 0])
+        h_rgb = tint_data.get("highlights", [0, 0, 0])
+        power = tint_data.get("range", 2.0) # 响应强度，默认2.0（平方衰减）
+
+        # 如果没有配置色偏，直接返回
+        if all(v == 0 for v in s_rgb) and all(v == 0 for v in h_rgb):
+            return r, g, b
+
+        # 计算亮度掩码 (基于 Rec.709 亮度公式)
+        # 使用处理后的图像计算亮度，确保色偏作用在最终的明暗关系上
+        luma = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        luma = np.clip(luma, 0, 1)
+
+        # 响应式权重计算 (Responsive Weights)
+        # Shadow Mask: 越黑的地方 (1-luma) 越大，通过 power 控制衰减速度
+        s_mask = np.power(1.0 - luma, power)
+        
+        # Highlight Mask: 越亮的地方 luma 越大
+        h_mask = np.power(luma, power)
+
+        # 应用色偏：原始值 + (阴影色 * 阴影掩码) + (高光色 * 高光掩码)
+        # 支持负值 (减色)
+        r_new = r + (s_rgb[0] * s_mask) + (h_rgb[0] * h_mask)
+        g_new = g + (s_rgb[1] * s_mask) + (h_rgb[1] * h_mask)
+        b_new = b + (s_rgb[2] * s_mask) + (h_rgb[2] * h_mask)
+
+        # 再次截断防止溢出
+        return np.clip(r_new, 0, 1), np.clip(g_new, 0, 1), np.clip(b_new, 0, 1)
+
     def reinhard_curve(self, x, gamma):
         if x is None: return None
         mapped = x * (x / (1.0 + x))
@@ -203,16 +249,14 @@ class FilmSimNode:
         
         for i in range(image.shape[0]):
             img_np = image[i].cpu().numpy()
-            
             height, width = img_np.shape[:2]
             p = self.get_film_params(film_type)
             
             lux_r, lux_g, lux_b, lux_total = self.luminance_calc(img_np, p)
-            
             if p["type"] == "color":
-                avg_lux = (np.mean(lux_r) + np.mean(lux_g) + np.mean(lux_b)) / 3.0
+                 avg_lux = (np.mean(lux_r) + np.mean(lux_g) + np.mean(lux_b)) / 3.0
             else:
-                avg_lux = np.mean(lux_total)
+                 avg_lux = np.mean(lux_total)
 
             sens = (1.0 - avg_lux) * 0.75 + 0.10
             sens = np.clip(sens, 0.10, 0.7)
@@ -236,7 +280,8 @@ class FilmSimNode:
 
             final_r, final_g, final_b = None, None, None
             grain_str = [g * grain_factor * sens for g in p["grain_base"]]
-
+            
+            # --- COLOR 处理逻辑 ---
             if p["type"] == "color":
                 bloom_r = apply_bloom(lux_r, 55)
                 bloom_g = apply_bloom(lux_g, 35)
@@ -250,19 +295,17 @@ class FilmSimNode:
                 dg, lg, xg = p["opt_g"]
                 db, lb, xb = p["opt_b"]
                 
-                # Composition
                 l_r_comp = bloom_r * dr + (lux_r**xr) * lr
                 l_g_comp = bloom_g * dg + (lux_g**xg) * lg
                 l_b_comp = bloom_b * db + (lux_b**xb) * lb
                 
-                # Cross-talk Grain
                 cross_talk = p["grain_base"][3] * grain_factor * sens
                 l_r_comp += gn_r + gn_g * cross_talk + gn_b * cross_talk
                 l_g_comp += gn_r * cross_talk + gn_g + gn_b * cross_talk
                 l_b_comp += gn_r * cross_talk + gn_g * cross_talk + gn_b
 
+                # 1. 应用曲线
                 if tone_mapping == "filmic":
-                    # 传入 exposure 参数
                     final_r = self.filmic_curve(l_r_comp, p["curve"], exposure)
                     final_g = self.filmic_curve(l_g_comp, p["curve"], exposure)
                     final_b = self.filmic_curve(l_b_comp, p["curve"], exposure)
@@ -273,10 +316,16 @@ class FilmSimNode:
                     final_b = self.reinhard_curve(l_b_comp, gamma_param)
                 else:
                     final_r, final_g, final_b = l_r_comp, l_g_comp, l_b_comp
+                
+                # 2. 应用响应式色偏 (新增步骤)
+                # 获取 tint 数据，如果没有则传空字典
+                tint_data = p.get("tint", {})
+                final_r, final_g, final_b = self.apply_split_toning(final_r, final_g, final_b, tint_data)
 
                 merged = cv2.merge([final_r, final_g, final_b])
 
-            else: # B&W
+            # --- B&W 处理逻辑 ---
+            else: 
                 bloom_l = apply_bloom(lux_total, 55)
                 gn_l = self.generate_grain(lux_total, grain_str[3], 0) if grain_factor > 0 else 0
                 
@@ -284,18 +333,22 @@ class FilmSimNode:
                 l_total_comp = bloom_l * dl + (lux_total**xl) * ll + gn_l
                 
                 if tone_mapping == "filmic":
-                    # 传入 exposure 参数
                     final_bw = self.filmic_curve(l_total_comp, p["curve"], exposure)
                 elif tone_mapping == "reinhard":
                     final_bw = self.reinhard_curve(l_total_comp, p["curve"]["gamma"])
                 else:
                     final_bw = l_total_comp
-                    
-                merged = cv2.merge([final_bw, final_bw, final_bw])
+                
+                # 黑白胶片也可以应用色偏 (例如 Sepia 复古褐色)
+                tint_data = p.get("tint", {})
+                # 对于黑白，我们需要复制成三通道来应用颜色
+                fr, fg, fb = final_bw, final_bw, final_bw
+                fr, fg, fb = self.apply_split_toning(fr, fg, fb, tint_data)
+                
+                merged = cv2.merge([fr, fg, fb])
 
             # Safety clip
             merged = np.clip(merged, 0, 1)
-            
             output_images.append(torch.from_numpy(merged))
 
         return (torch.stack(output_images),)
@@ -305,5 +358,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FilmSimNode": "Film Simulation V3 (Adaptive)"
+    "FilmSimNode": "Film Simulation"
 }
