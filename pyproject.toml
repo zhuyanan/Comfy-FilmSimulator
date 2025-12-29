@@ -29,7 +29,7 @@ Documentation = "https://github.com/zhuyanan/Comfy-FilmSimulator/wiki"
 "Bug Tracker" = "https://github.com/zhuyanan/Comfy-FilmSimulator/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "@monojason"
 DisplayName = "Comfy-FilmSimulator"
 Icon = ""
 includes = [] 
