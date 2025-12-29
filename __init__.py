@@ -49,8 +49,8 @@ FILM_PRESETS = load_presets()
 
 class FilmSimNode:
     """
-    Film Simulation for ComfyUI (Fixed V3.6)
-    - Fixes: TypeError when calculating blur radius
+    Film Simulation for ComfyUI (V3.7)
+    - Fixes: Corsstalk Grain Issue
     - Features: Coherent Grain, Split Toning, Hable Curve
     """
 
@@ -355,5 +355,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FilmSimNode": "Film Simulation V3.6"
+    "FilmSimNode": "Film Simulation V3.7"
 }
