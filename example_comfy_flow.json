@@ -1,31 +1,155 @@
 {
-  "format": "ComfyUI_example_v1",
-  "description": "Minimal example flow demonstrating FilmSim node usage. Replace the ImageLoader/Saver nodes with your actual ComfyUI nodes when importing.",
+  "id": "1fc61819-42ba-4384-8ea1-ab7b2559c79f",
+  "revision": 0,
+  "last_node_id": 5,
+  "last_link_id": 5,
   "nodes": [
-    {
-      "id": "image_loader",
-      "type": "ImageLoader",
-      "params": { "path": "input.jpg" }
-    },
     {
       "id": "filmsim",
       "type": "FilmSimNode",
-      "params": {
-        "film_type": "Kodak Portra 400",
-        "tone_mapping": "filmic",
-        "exposure": 0.0,
-        "grain_factor": 1.0,
-        "halation_factor": 1.0
-      }
+      "pos": [
+        382.798828125,
+        80
+      ],
+      "size": [
+        270,
+        154
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "image",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "FilmSimNode"
+      },
+      "widgets_values": [
+        "Neutral Reference (Standard)",
+        "filmic",
+        0,
+        1,
+        1
+      ]
     },
     {
-      "id": "saver",
-      "type": "ImageSaver",
-      "params": { "path": "output.jpg" }
+      "id": 2,
+      "type": "SaveImage",
+      "pos": [
+        702.798828125,
+        80
+      ],
+      "size": [
+        270,
+        58
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 2
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.6.0",
+        "Node name for S&R": "SaveImage"
+      },
+      "widgets_values": [
+        "ComfyUI"
+      ]
+    },
+    {
+      "id": 1,
+      "type": "LoadImage",
+      "pos": [
+        50,
+        80
+      ],
+      "size": [
+        282.798828125,
+        314
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.6.0",
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "example.png",
+        "image"
+      ]
     }
   ],
-  "connections": [
-    { "from": "image_loader", "out": "image", "to": "filmsim", "in": "image" },
-    { "from": "filmsim", "out": "image", "to": "saver", "in": "image" }
-  ]
+  "links": [
+    [
+      1,
+      1,
+      0,
+      "filmsim",
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      "filmsim",
+      0,
+      2,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 1.4974886904732438,
+      "offset": [
+        339.4578199470407,
+        237.11992852398498
+      ]
+    },
+    "workflowRendererVersion": "LG",
+    "frontendVersion": "1.34.9",
+    "VHS_latentpreview": false,
+    "VHS_latentpreviewrate": 0,
+    "VHS_MetadataImage": true,
+    "VHS_KeepIntermediate": true
+  },
+  "version": 0.4
 }
