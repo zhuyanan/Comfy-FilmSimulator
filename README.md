@@ -8,7 +8,7 @@ This repository provides a ComfyUI-compatible node implementation that simulates
 
 ## Quick highlights
 
-- Node name (displayed in ComfyUI): **Film Simulation V3 (Adaptive)**
+- Node name (displayed in ComfyUI): **Film Simulation V3.7**
 - Node category: `FilmSim/Film`
 - Key files:
   - `__init__.py` — the ComfyUI node implementation (expects ComfyUI IMAGE tensors, uses PyTorch + OpenCV)
@@ -41,7 +41,7 @@ pip install numpy opencv-python torch
       films.json
 ```
 
-3. Restart ComfyUI. The node will appear under category `FilmSim/Film` named `Film Simulation V3 (Adaptive)`.
+3. Restart ComfyUI. The node will appear under category `FilmSim/Film` named `Film Simulation V3.7`.
 
 ---
 
