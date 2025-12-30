@@ -4,7 +4,7 @@ import json
 import os
 import sys
 
-# --- 依赖检查 ---
+# --- Check Dependencies ---
 try:
     import cv2
 except ImportError:
@@ -21,10 +21,11 @@ def load_presets():
         
     json_path = os.path.join(current_dir, "films.json")
     
+    # Minimal Fallback
     default_presets = {
         "Default Color": {
             "type": "color",
-            "matrix": [0.86, 0.09, 0.05, 0.05, 0.90, 0.05, 0.03, 0.07, 0.90, 0, 0, 0],
+            "matrix": [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0, 0, 0],
             "sens_factor": 1.0,
             "grain_base": [0.10, 0.10, 0.10, 0.05],
             "opt_r": [1.0, 1.0, 1.0],
@@ -49,9 +50,11 @@ FILM_PRESETS = load_presets()
 
 class FilmSimNode:
     """
-    Film Simulation for ComfyUI (V3.8)
-    - Features: Added local contrast enhancement (Clarity)
-    - Improved: Highlight desaturation in filmic curve
+    Film Simulation V4.0 (Final)
+    - Coherent Grain with Crosstalk
+    - Local Contrast Enhancement (Clarity)
+    - High-Fidelity Tone Mapping with Highlight Protection
+    - Responsive Split Toning
     """
 
     def __init__(self):
@@ -67,7 +70,7 @@ class FilmSimNode:
                 "image": ("IMAGE",),
                 "film_type": (film_list, {"default": default_film}),
                 "tone_mapping": (["filmic", "reinhard", "none"], {"default": "filmic"}),
-                "exposure": ("FLOAT", {"default": 0.0, "min": -3.0, "max": 3.0, "step": 0.1}),
+                "exposure": ("FLOAT", {"default": 0.0, "min": -3.0, "max": 3.0, "step": 0.1, "tooltip": "EV Offset"}),
                 "grain_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1}),
                 "halation_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1}),
             },
@@ -79,10 +82,21 @@ class FilmSimNode:
     CATEGORY = "FilmSim/Film"
 
     def get_film_params(self, film_type_name):
+        # Create a shallow copy to prevent modifying global state
         p = FILM_PRESETS.get(film_type_name)
         if p is None:
              p = list(FILM_PRESETS.values())[0]
+        p = p.copy() 
         
+        # Ensure matrix has enough elements
+        if "matrix" not in p: p["matrix"] = [1.0,0,0, 0,1.0,0, 0,0,1.0, 0,0,0]
+        while len(p["matrix"]) < 12: p["matrix"].append(0.0)
+
+        # Ensure grain_base has 4 elements (crosstalk)
+        if "grain_base" not in p: p["grain_base"] = [0.1, 0.1, 0.1, 0.0]
+        while len(p["grain_base"]) < 4: p["grain_base"].append(0.0)
+
+        # Default options
         if p["type"] == "color":
              if "opt_r" not in p: p["opt_r"] = [1.0, 1.0, 1.0]
              if "opt_g" not in p: p["opt_g"] = [1.0, 1.0, 1.0]
@@ -121,19 +135,37 @@ class FilmSimNode:
         
         noise = np.random.normal(0, 1, channel.shape).astype(np.float32)
         
-        # 纹理权重：中间调最强
+        # Texture visibility weights based on luminance
         weights = (0.5 - np.abs(channel - 0.5)) * 2
         weights = np.clip(weights, 0.05, 0.9)
         
         weighted_noise = noise * weights * grain_intensity
-        # 适度模糊，避免只有单像素噪点
+        # Soft blur to simulate silver halide size
         weighted_noise = cv2.GaussianBlur(weighted_noise, (3, 3), 1)
         return np.clip(weighted_noise, -1, 1)
+
+    def apply_local_contrast(self, image, strength=0.2):
+        if strength <= 0: return image
+        # Unsharp Masking Logic for Clarity
+        blur_radius = int(min(image.shape[0], image.shape[1]) * 0.01) | 1
+        blurred = cv2.GaussianBlur(image, (blur_radius, blur_radius), 0)
+        details = image - blurred
+        return image + details * strength
+
+    def adjust_saturation(self, img, saturation):
+        # Fast Saturation: Color = Luma + (Color - Luma) * Sat
+        if saturation == 1.0: return img
+        
+        luma = img[:,:,0] * 0.2126 + img[:,:,1] * 0.7152 + img[:,:,2] * 0.0722
+        luma = np.stack([luma, luma, luma], axis=2)
+        
+        return luma + (img - luma) * saturation
 
     def filmic_curve(self, x, c, manual_exposure=0.0):
         if x is None: return None
         x = np.maximum(x, 0)
         
+        # 1. Adaptive Gain (Hable anchor)
         base_scaling = 10.0 * (0.18 ** 2.0)
         current_mid_response = 0.18 ** c["gamma"]
         standard_adaptive_scale = base_scaling / (current_mid_response + 1e-6)
@@ -153,21 +185,18 @@ class FilmSimNode:
 
         mapped = curve_fn(curr_x)
         
+        # White point normalization
         W_linear = (1.0 / 0.18) ** c["gamma"]
         W_input = W_linear * standard_adaptive_scale
         white_scale = curve_fn(np.array([W_input]))
         
-        # 确保 white_scale 是标量，防止潜在的广播问题
         if isinstance(white_scale, np.ndarray):
-            if white_scale.size == 1:
-                white_scale = float(white_scale)
-            else:
-                white_scale = 1.0 # Fallback
-
+            white_scale = float(white_scale) if white_scale.size == 1 else 1.0
         if white_scale < 1e-4: white_scale = 1.0 
             
         normalized = mapped / white_scale
         
+        # Standard Matte Look (Fixed range, tints handle the rest)
         target_black = 0.02
         target_white = 0.98
         return normalized * (target_white - target_black) + target_black
@@ -201,65 +230,6 @@ class FilmSimNode:
 
         return np.clip(r_new, 0, 1), np.clip(g_new, 0, 1), np.clip(b_new, 0, 1)
 
-    # [新增] 局部对比度增强 (模拟 Clarity/Structure)
-    def apply_local_contrast(self, image, strength=0.2):
-        # 使用双边滤波或高斯模糊提取低频信息
-        # 这里使用高斯模糊，性能更好且足以模拟胶片的"锐度"
-        blur_radius = int(min(image.shape[0], image.shape[1]) * 0.01) | 1
-        blurred = cv2.GaussianBlur(image, (blur_radius, blur_radius), 0)
-        
-        # 高频细节 = 原图 - 低频
-        details = image - blurred
-        
-        # 增强细节：在原图基础上叠加细节
-        # strength 决定了增强的力度
-        enhanced = image + details * strength
-        return enhanced
-
-    # [修改] 曲线函数：增加高光去饱和逻辑
-    def filmic_curve(self, x, c, manual_exposure=0.0):
-        if x is None: return None
-        x = np.maximum(x, 0)
-        
-        # --- 1. 自适应缩放 ---
-        base_scaling = 10.0 * (0.18 ** 2.0)
-        current_mid_response = 0.18 ** c["gamma"]
-        standard_adaptive_scale = base_scaling / (current_mid_response + 1e-6)
-        
-        json_bias = c.get("exposure_bias", 0.0)
-        total_ev = json_bias + manual_exposure
-        exposure_mult = 2.0 ** total_ev
-        
-        # 输入信号
-        curr_x = (standard_adaptive_scale * exposure_mult) * (x ** c["gamma"]) 
-        
-        # --- 2. Hable 曲线映射 ---
-        A, B, C, D, E, F = c["A"], c["B"], c["C"], c["D"], c["E"], c["F"]
-        
-        def curve_fn(t):
-            denominator = (t * (A * t + B) + D * F) + 1e-6 
-            numerator = (t * (A * t + C * B) + D * E)
-            return (numerator / denominator) - (E / F)
-
-        mapped = curve_fn(curr_x)
-        
-        # 归一化白点
-        W_linear = (1.0 / 0.18) ** c["gamma"]
-        W_input = W_linear * standard_adaptive_scale
-        white_scale = curve_fn(np.array([W_input]))
-        if isinstance(white_scale, np.ndarray):
-            white_scale = float(white_scale) if white_scale.size == 1 else 1.0
-        if white_scale < 1e-4: white_scale = 1.0 
-            
-        normalized = mapped / white_scale
-        
-        # Matte Look
-        target_black = 0.02
-        target_white = 0.98
-        final_curve = normalized * (target_white - target_black) + target_black
-        
-        return final_curve
-
     def process_film(self, image, film_type, tone_mapping, exposure, grain_factor, halation_factor):
         self.time_hash = int(cv2.getTickCount())
         output_images = []
@@ -272,7 +242,7 @@ class FilmSimNode:
             height, width = img_np.shape[:2]
             p = self.get_film_params(film_type)
             
-            # --- 1. 物理层：亮度与光晕 ---
+            # --- 1. Physics: Luminance & Sensitivity ---
             lux_r, lux_g, lux_b, lux_total = self.luminance_calc(img_np, p)
             
             if p["type"] == "color":
@@ -280,15 +250,18 @@ class FilmSimNode:
             else:
                 avg_lux_map = lux_total
 
+            # Sensitivity Map: Dark areas are more sensitive to grain/bloom visibility
             sens_map = (1.0 - avg_lux_map) * 0.75 + 0.10
             sens_map = np.clip(sens_map, 0.10, 0.7)
+            # Scalar for Gaussian kernels
             sens_scalar = float(np.mean(sens_map))
             
-            # 光晕
+            # --- 2. Physics: Halation / Bloom ---
             scale_ratio = max(height, width) / 3000.0
             rads = int(20 * (sens_scalar**2) * p["sens_factor"] * 2.0 * scale_ratio) 
             rads = max(1, rads)
             ksize = rads * 2 + 1
+            
             base_diffusion = 0.05 * p["sens_factor"]
             halo_str = 23 * sens_scalar**2 * p["sens_factor"] * halation_factor
 
@@ -302,13 +275,16 @@ class FilmSimNode:
                 effect = bloom * weights * halo_str
                 return effect / (1.0 + effect)
 
-            # --- 2. 颗粒层 (Coherent + Crosstalk) ---
+            # --- 3. Physics: Grain (Coherent + Crosstalk) ---
             g_str = [g * grain_factor for g in p["grain_base"]]
-            gn_r, gn_g, gn_b = 0, 0, 0
             
+            gn_r, gn_g, gn_b = 0, 0, 0
             if grain_factor > 0:
                 if p["type"] == "color":
+                    # Master texture (Luminance based)
                     gn_master = self.generate_grain(avg_lux_map, 1.0, seed_shift=0)
+                    
+                    # Small decoherence for RGB
                     color_decoherence = 0.2
                     gn_var_r = self.generate_grain(lux_r, 1.0, seed_shift=100)
                     gn_var_g = self.generate_grain(lux_g, 1.0, seed_shift=200)
@@ -322,6 +298,7 @@ class FilmSimNode:
                     raw_gn_g = mix_grain(gn_master, gn_var_g, g_str[1])
                     raw_gn_b = mix_grain(gn_master, gn_var_b, g_str[2])
 
+                    # Dye Crosstalk (Grain from one layer affecting others)
                     xtalk_val = p["grain_base"][3]
                     if xtalk_val > 0:
                         xtalk_amount = xtalk_val * grain_factor * sens_map * 0.5
@@ -331,9 +308,10 @@ class FilmSimNode:
                     else:
                         gn_r, gn_g, gn_b = raw_gn_r, raw_gn_g, raw_gn_b
                 else:
+                    # B&W Grain
                     gn_l = self.generate_grain(lux_total, g_str[3] * sens_map, 0)
 
-            # --- 3. 初始合成与局部对比度增强 (关键改进步骤) ---
+            # --- 4. Composition & Tone Mapping ---
             final_r, final_g, final_b = None, None, None
 
             if p["type"] == "color":
@@ -345,40 +323,36 @@ class FilmSimNode:
                 dg, lg, xg = p["opt_g"]
                 db, lb, xb = p["opt_b"]
                 
-                # 线性组合
+                # Optical Mix
                 l_r_comp = bloom_r * dr + (lux_r**xr) * lr + gn_r
                 l_g_comp = bloom_g * dg + (lux_g**xg) * lg + gn_g
                 l_b_comp = bloom_b * db + (lux_b**xb) * lb + gn_b
-
-                # [改进] 应用局部对比度增强 (Clarity)
-                # 放在 Tone Mapping 之前，可以防止曲线压缩导致的细节丢失
-                # 强度根据 sens_factor 动态调整 (ISO越高，微反差通常越大/越硬)
+                
+                # Local Contrast Enhancement (Clarity)
+                # Prevents flat look from compression
                 lce_strength = 0.15 * p["sens_factor"]
                 l_r_comp = self.apply_local_contrast(l_r_comp, lce_strength)
                 l_g_comp = self.apply_local_contrast(l_g_comp, lce_strength)
                 l_b_comp = self.apply_local_contrast(l_b_comp, lce_strength)
 
-                # --- 4. Tone Mapping 与 高光去饱和 ---
                 if tone_mapping == "filmic":
-                    r_mapped = self.filmic_curve(l_r_comp, p["curve"], exposure)
-                    g_mapped = self.filmic_curve(l_g_comp, p["curve"], exposure)
-                    b_mapped = self.filmic_curve(l_b_comp, p["curve"], exposure)
+                    final_r = self.filmic_curve(l_r_comp, p["curve"], exposure)
+                    final_g = self.filmic_curve(l_g_comp, p["curve"], exposure)
+                    final_b = self.filmic_curve(l_b_comp, p["curve"], exposure)
                     
-                    # [改进] 高光去饱和 (Highlight Desaturation)
-                    # 计算映射后的亮度
-                    luma_mapped = 0.299 * r_mapped + 0.587 * g_mapped + 0.114 * b_mapped
+                    # --- Highlight Saturation Compensation ---
+                    # 1. Boost saturation slightly to recover density lost by S-Curve
+                    merged_temp = cv2.merge([final_r, final_g, final_b])
+                    merged_temp = self.adjust_saturation(merged_temp, 1.15)
                     
-                    # 定义高光阈值 (例如亮度 > 0.8 开始去饱和)
-                    sat_mask = np.clip((luma_mapped - 0.7) * 3.0, 0.0, 1.0) # 0.7~1.0 渐变为 1
+                    # 2. Highlight Protection (Only for pure whites > 0.95)
+                    luma_final = 0.2126*merged_temp[:,:,0] + 0.7152*merged_temp[:,:,1] + 0.0722*merged_temp[:,:,2]
+                    luma_final = np.stack([luma_final]*3, axis=2)
                     
-                    # 混合彩色结果与黑白亮度
-                    # 越亮，sat_mask 越大，越倾向于 luma_mapped (纯白)
-                    # 这里的 0.3 控制最大去饱和程度 (保留30%色彩，避免完全死白)
-                    desat_factor = sat_mask * 0.5 
+                    highlight_mask = np.clip((luma_final - 0.95) * 20.0, 0.0, 1.0)
+                    merged_final = merged_temp * (1.0 - highlight_mask) + luma_final * highlight_mask
                     
-                    final_r = r_mapped * (1.0 - desat_factor) + luma_mapped * desat_factor
-                    final_g = g_mapped * (1.0 - desat_factor) + luma_mapped * desat_factor
-                    final_b = b_mapped * (1.0 - desat_factor) + luma_mapped * desat_factor
+                    final_r, final_g, final_b = cv2.split(merged_final)
 
                 elif tone_mapping == "reinhard":
                     gamma_param = p["curve"]["gamma"]
@@ -388,19 +362,19 @@ class FilmSimNode:
                 else:
                     final_r, final_g, final_b = l_r_comp, l_g_comp, l_b_comp
                 
-                # 色偏
+                # Split Toning
                 tint_data = p.get("tint", {})
                 final_r, final_g, final_b = self.apply_split_toning(final_r, final_g, final_b, tint_data)
                 merged = cv2.merge([final_r, final_g, final_b])
 
-            else: # B&W
+            else: # B&W Logic
                 bloom_l = apply_bloom(lux_total, 55)
                 if grain_factor <= 0: gn_l = 0
                 
                 dl, ll, xl = p["opt_l"]
                 l_total_comp = bloom_l * dl + (lux_total**xl) * ll + gn_l
                 
-                # 黑白片也应用 Clarity
+                # B&W Clarity
                 lce_strength = 0.20 * p["sens_factor"]
                 l_total_comp = self.apply_local_contrast(l_total_comp, lce_strength)
                 
@@ -426,5 +400,5 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FilmSimNode": "Film Simulation V3.8"
+    "FilmSimNode": "Film Simulation V4 (Ultimate)"
 }
