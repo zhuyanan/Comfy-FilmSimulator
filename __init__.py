@@ -145,7 +145,6 @@ class FilmSimNode:
         return np.clip(weighted_noise, -1, 1)
 
     def apply_local_contrast(self, image, strength=0.2):
-        if strength <= 0: return image
         # Unsharp Masking Logic for Clarity
         blur_radius = int(min(image.shape[0], image.shape[1]) * 0.01) | 1
         blurred = cv2.GaussianBlur(image, (blur_radius, blur_radius), 0)
@@ -190,15 +189,20 @@ class FilmSimNode:
         W_input = W_linear * standard_adaptive_scale
         white_scale = curve_fn(np.array([W_input]))
         
-        if isinstance(white_scale, np.ndarray):
-            white_scale = float(white_scale) if white_scale.size == 1 else 1.0
+        # [Fixed] Ensure scalar for boolean checks
+        white_scale_raw = curve_fn(np.array([W_input]))
+        if isinstance(white_scale_raw, np.ndarray):
+             white_scale = float(white_scale_raw.item()) if white_scale_raw.size == 1 else 1.0
+        else:
+             white_scale = float(white_scale_raw)
+
         if white_scale < 1e-4: white_scale = 1.0 
             
         normalized = mapped / white_scale
         
         # Standard Matte Look (Fixed range, tints handle the rest)
-        target_black = 0.02
-        target_white = 0.98
+        target_black = 0.01
+        target_white = 0.99
         return normalized * (target_white - target_black) + target_black
 
     def reinhard_curve(self, x, gamma):
@@ -330,10 +334,21 @@ class FilmSimNode:
                 
                 # Local Contrast Enhancement (Clarity)
                 # Prevents flat look from compression
-                lce_strength = 0.15 * p["sens_factor"]
-                l_r_comp = self.apply_local_contrast(l_r_comp, lce_strength)
-                l_g_comp = self.apply_local_contrast(l_g_comp, lce_strength)
-                l_b_comp = self.apply_local_contrast(l_b_comp, lce_strength)
+                base_lce_strength  = 0.15 * p["sens_factor"]
+
+                # Create a highlight mask: 0 in shadows, 1 in pure white
+                # This mask will control how much LCE is applied to different brightness levels
+                # LCE will be stronger in brighter areas (0.7 to 1.0)
+                highlight_mask = np.clip(avg_lux_map * 4.0 - 2.8, 0.0, 1.0) # Curves for highlight emphasis (adjust 4.0, -2.8 as needed)
+                
+                # Blend LCE strength: base_lce_strength + additional strength for highlights
+                # Example: Highlights get base + (base * 0.5) = 1.5 * base
+                effective_lce_strength = base_lce_strength + (base_lce_strength * 0.5 * highlight_mask)
+                
+                # Apply LCE per channel using the highlight-weighted strength map
+                final_r = self.apply_local_contrast(l_r_comp, effective_lce_strength)
+                final_g = self.apply_local_contrast(l_g_comp, effective_lce_strength)
+                final_b = self.apply_local_contrast(l_b_comp, effective_lce_strength)
 
                 if tone_mapping == "filmic":
                     final_r = self.filmic_curve(l_r_comp, p["curve"], exposure)
@@ -374,9 +389,13 @@ class FilmSimNode:
                 dl, ll, xl = p["opt_l"]
                 l_total_comp = bloom_l * dl + (lux_total**xl) * ll + gn_l
                 
-                # B&W Clarity
-                lce_strength = 0.20 * p["sens_factor"]
-                l_total_comp = self.apply_local_contrast(l_total_comp, lce_strength)
+                # [REVISED] Apply Local Contrast, with Highlight Emphasis for B&W
+                base_lce_strength = 0.20 * p["sens_factor"] # Higher base for B&W
+                
+                highlight_mask = np.clip(avg_lux_map * 4.0 - 2.8, 0.0, 1.0)
+                effective_lce_strength = base_lce_strength + (base_lce_strength * 0.5 * highlight_mask)
+                
+                l_total_comp = self.apply_local_contrast(l_total_comp, effective_lce_strength)
                 
                 if tone_mapping == "filmic":
                     final_bw = self.filmic_curve(l_total_comp, p["curve"], exposure)
