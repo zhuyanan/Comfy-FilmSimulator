@@ -58,6 +58,7 @@ pip install numpy opencv-python torch
 - exposure (FLOAT) — manual EV compensation, range roughly -3.0 .. +3.0 (adds to preset `exposure_bias`)
 - grain_factor (FLOAT) — global multiplier for grain strength (default 1.0)
 - halation_factor (FLOAT) — controls bloom/halation strength (default 1.0)
+- linear_input （BOOLEAN）— enable when the input image is 16bit linear (default FALSE)
 
 Return: processed IMAGE tensor.
 
