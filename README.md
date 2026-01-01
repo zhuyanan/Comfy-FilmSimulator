@@ -5,6 +5,11 @@ ComfyUI node: realistic, adaptive film simulation for photographic and cinematic
 This repository provides a ComfyUI-compatible node implementation that simulates film stock response, grain, bloom/halation and tone mapping. It includes an extendable preset library (`films.json`) and a PyTorch/OpenCV-based processing node (`__init__.py`) that exposes controls for film type, tone mapping, exposure, grain and halation.
 
 ---
+## New Updates
+- Added the option for 16-bit linear image input. If the input image is a 16-bit linear image, better highlights and shadow performance can be achieved.
+- This option can be used in conjunction with other RAW image decoding nodes. I also added a custom DNG reader node in the main directory. Since I use a Leica camera, I only tested it with DNG files, but in theory, it can also be used for decoding RAW images from other digital cameras. Please enable Linear Output when exporting images.
+
+---
 
 ## Quick highlights
 
