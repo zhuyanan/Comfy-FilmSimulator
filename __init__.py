@@ -50,7 +50,8 @@ FILM_PRESETS = load_presets()
 
 class FilmSimNode:
     """
-    Film Simulation V4.0 (Final)
+    Film Simulation V4.1 (Linear input)
+    - Support 16bit linear image input
     - Coherent Grain with Crosstalk
     - Local Contrast Enhancement (Clarity)
     - High-Fidelity Tone Mapping with Highlight Protection
@@ -73,6 +74,7 @@ class FilmSimNode:
                 "exposure": ("FLOAT", {"default": 0.0, "min": -3.0, "max": 3.0, "step": 0.1, "tooltip": "EV Offset"}),
                 "grain_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1}),
                 "halation_factor": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 3.0, "step": 0.1}),
+                "linear_input": ("BOOLEAN", {"default": False, "label_on": "16-bit Linear", "label_off": "Standard"})
             },
         }
 
@@ -234,14 +236,29 @@ class FilmSimNode:
 
         return np.clip(r_new, 0, 1), np.clip(g_new, 0, 1), np.clip(b_new, 0, 1)
 
-    def process_film(self, image, film_type, tone_mapping, exposure, grain_factor, halation_factor):
+    def process_film(self, image, film_type, tone_mapping, exposure, grain_factor, halation_factor, linear_input=False):
         self.time_hash = int(cv2.getTickCount())
         output_images = []
         
         for i in range(image.shape[0]):
             img_np = image[i].cpu().numpy()
-            if img_np.dtype != np.float32 and img_np.dtype != np.float64:
-                 img_np = img_np.astype(np.float32)
+            
+            # Handle 16-bit linear input
+            if linear_input:
+                # Convert from 16-bit linear to float32 in 0-1 range
+                if img_np.dtype != np.float32 and img_np.dtype != np.float64:
+                    # For 16-bit linear input, assume range is 0-65535
+                    img_np = img_np.astype(np.float32) / 65535.0
+                # Apply gamma correction to convert from linear to sRGB for processing
+                # Using gamma 2.2 as standard for linear to sRGB conversion
+                img_np = np.power(np.clip(img_np, 0, 1), 1.0/2.2)
+            else:
+                # For standard input, ensure proper data type
+                if img_np.dtype != np.float32 and img_np.dtype != np.float64:
+                    img_np = img_np.astype(np.float32)
+            
+            # Ensure data is in appropriate range for processing
+            img_np = np.clip(img_np, 0, 1)
 
             height, width = img_np.shape[:2]
             p = self.get_film_params(film_type)
@@ -419,5 +436,8 @@ NODE_CLASS_MAPPINGS = {
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "FilmSimNode": "Film Simulation V4 (Ultimate)"
+    "FilmSimNode": "Film Simulation V4.1"
 }
+
+
+
