@@ -1,141 +1,94 @@
-# Comfy-FilmSimulator
+# Comfy-FilmSimulator (SmartHDR Edition)
 
-ComfyUI node: realistic, adaptive film simulation for photographic and cinematic looks.
+ComfyUI node: realistic, adaptive film simulation for photographic and cinematic looks, now with full HDR support and DNG reading capabilities.
 
-This repository provides a ComfyUI-compatible node implementation that simulates film stock response, grain, bloom/halation and tone mapping. It includes an extendable preset library (`films.json`) and a PyTorch/OpenCV-based processing node (`__init__.py`) that exposes controls for film type, tone mapping, exposure, grain and halation.
-
----
-## New Updates
-- Added the option for 16-bit linear image input. If the input image is a 16-bit linear image, better highlights and shadow performance can be achieved.
-- This option can be used in conjunction with other RAW image decoding nodes. I also added a custom DNG reader node in the main directory. Since I use a Leica camera, I only tested it with DNG files, but in theory, it can also be used for decoding RAW images from other digital cameras. Please enable Linear Output when exporting images.
+This repository provides a ComfyUI-compatible node implementation that simulates film stock response, grain, bloom/halation and tone mapping. It features advanced HDR processing, a native DNG reader, and high-quality AVIF/HEIC export.
 
 ---
+## Features & Nodes
 
-## Quick highlights
+### 1. DNG Image Reader (Rawpy)
+- **Category**: `SmartHDR`
+- **Description**: High-fidelity DNG/RAW decoding using `rawpy`.
+- **Key Features**:
+  - Detailed metadata extraction (Camera model, Bayer pattern, White Balance).
+  - Advanced White Balance modes (As Shot, Auto, Daylight, etc.).
+  - Adjustable Physical Exposure Gain.
+  - Linear/HDR output support.
 
-- Node name (displayed in ComfyUI): **Film Simulation**
-- Node category: `FilmSim/Film`
-- Key files:
-  - `__init__.py` — the ComfyUI node implementation (expects ComfyUI IMAGE tensors, uses PyTorch + OpenCV)
-  - `films.json` — presets database of film stocks (color & B/W) with tone curve, grain and optical params
-  - `LICENSE` — project license
-- Tone-mapping options: `filmic`, `reinhard`, `none`
-- Presets include many classic stocks (e.g. Kodak Portra 160/400/800, Fuji Pro 400H, Tri-X 400, T-Max, LomoChrome, etc.)
+### 2. Film Simulation V4.1 (HDR Capable)
+- **Category**: `SmartHDR`
+- **Description**: Professional-grade film simulation node with HDR workflow.
+- **Key Features**:
+  - **Adaptive Physical White Balance**: Real Kelvin-based color temperature adjustment.
+  - **Auto Exposure**: Automatic luminance normalization to 18% gray.
+  - **HDR Workflow**: Processes in high dynamic range linear space.
+  - **Realistic Grain**: Coherent grain with crosstalk and luminance-based masking.
+  - **Halation/Bloom**: Physically inspired light bleeding.
+  - **SDR Preview**: Integrated filmic tone mapping for real-time SDR monitoring while preserving HDR data.
+
+### 3. Save AVIF/HEIC HDR (Native)
+- **Category**: `SmartHDR`
+- **Description**: Saves images in high-bit depth HDR formats.
+- **Key Features**:
+  - Supports **AVIF** and **HEIC**.
+  - **PQ (Perceptual Quantizer)** transfer function for genuine HDR display.
+  - Rec.2020 color space conversion.
+  - 10-bit and 12-bit encoding support (via `pillow-heif`).
 
 ---
 
 ## Installation (ComfyUI)
 
-1. Install the required Python packages if not already present (run in the same environment ComfyUI uses):
+1. Install the required Python packages:
 
 ```bash
-pip install numpy opencv-python torch
+pip install numpy opencv-python rawpy pillow-heif torch
 ```
 
 - Note: Install `torch` according to your platform/GPU configuration (see https://pytorch.org).
-- If your ComfyUI environment already has these, skip re-installing them.
 
 2. Install the node:
-   - Copy `__init__.py` and `films.json` into a folder under your ComfyUI `custom_nodes` directory. Example:
+   - Copy all files (`__init__.py`, `dng_reader.py`, `film_sim.py`, `save_avif_hdr.py`, `films.json`) into a folder under your ComfyUI `custom_nodes` directory. Example:
 
 ```text
 <ComfyUI root>/
   custom_nodes/
-    FilmSim/
+    Comfy-FilmSimulator/
       __init__.py
+      dng_reader.py
+      film_sim.py
+      save_avif_hdr.py
       films.json
 ```
 
-3. Restart ComfyUI. The node will appear under category `FilmSim/Film` named `Film Simulation`.
+3. Restart ComfyUI. The nodes will appear under the `SmartHDR` category.
 
 ---
 
-## Inputs & Parameters (as exposed in the node)
+## Workflow Example
 
-- image (IMAGE) — input image tensor(s) (ComfyUI IMAGE)
-- film_type (select) — choose from presets listed in `films.json` (default: with `Default Film` fallback)
-- tone_mapping (select) — `filmic` (default), `reinhard`, `none`
-- exposure (FLOAT) — manual EV compensation, range roughly -3.0 .. +3.0 (adds to preset `exposure_bias`)
-- grain_factor (FLOAT) — global multiplier for grain strength (default 1.0)
-- halation_factor (FLOAT) — controls bloom/halation strength (default 1.0)
-- linear_input （BOOLEAN）— enable when the input image is 16bit linear (default FALSE)
-
-Return: processed IMAGE tensor.
+1. **Load**: Use `DNG Image Reader` to load a RAW file with `linear_output` enabled.
+2. **Process**: Connect to `Film Simulation V4.1`. Set `is_linear_input` to True. Adjust `wb_temperature_K` and `exposure`.
+3. **Save**: Connect the `hdr_image` output to `Save AVIF/HEIC HDR` to get a true HDR file, and use `preview_sdr` for standard ComfyUI previews.
 
 ---
 
-## How it works (high level)
+## Preset Library (`films.json`)
 
-- Input normalization & channel split (supports 3/4-channel inputs).
-- Per-preset color matrix converts incoming channels to film "lux" channels.
-- Adaptive filmic curve:
-  - Anchors mid-gray to avoid brightness drift with gamma changes.
-  - Uses preset tone curve (A-F, gamma, exposure_bias) with an adaptive whitepoint scaling.
-  - Outputs a matte look clamped to [0.02, 0.98] to emulate film/paper limits.
-- Grain generator:
-  - Per-channel randomized noise with weighting that depends on local luminance.
-  - Cross-talk mixes grain between channels to simulate analog film interactions.
-- Optical effects:
-  - Bloom/halation applied with configurable radii derived from image size and sensitivity factor.
-  - Split toneing for shadow/highlight weighting parameters present in presets.
-- Presets:
-  - `films.json` contains many stocks film presets values.
+Includes many classic stocks:
+- **Color**: Kodak Portra (160, 400, 800), Fuji Pro 400H, Cinestill (400D, 800T), LomoChrome, etc.
+- **B/W**: Kodak Tri-X 400, T-Max 100, Ilford HP5 Plus, Fuji Acros 100, etc.
 
 ---
 
-## Example usage (within ComfyUI)
+## Development & Attribution
 
-1. Add an image source node.
-2. Add the "Film Simulation" node (category: FilmSim/Film).
-3. Connect the image output to the `image` input on the FilmSim node.
-4. Select a `film_type` (e.g. "Kodak Portra 400"), choose `filmic` or `reinhard` tone mapping.
-5. Tweak `exposure`, `grain_factor` and `halation_factor` to taste.
-6. Connect the node output to your compositor or final render node.
-
----
-
-## Preset editing & adding new stocks
-
-- Presets are JSON objects in `films.json`.
-- Each preset includes:
-  - `type`: `"color"` or `"bw"`
-  - `matrix`: color transform coefficients (9 values for RGB mapping or last three entries used for B/W)
-  - `sens_factor`: affects bloom radius and halo strength
-  - `grain_base`: base grain strength for R/G/B/L channels and cross-talk factor
-  - `opt_r/opt_g/opt_b` or `opt_l`: per-channel optical composition coefficients
-  - `curve`: tone mapping parameters {A, B, C, D, E, F, gamma, exposure_bias}
-  - `tint`: shadow/highlight color tinting values
-- To create a new preset: copy an existing block, adjust parameters, save, and restart ComfyUI.
-
----
-
-## Development notes
-
-- The node uses OpenCV (cv2) for filtering and NumPy for array ops; PyTorch tensors are used for I/O with ComfyUI.
-- The code tries to fall back to an embedded default preset if `films.json` is missing or fails to load.
-- Timestamps (tick count) seed the grain generator for per-frame variation.
-
-Suggested dev setup:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt  # if you add one
-# or at minimum:
-pip install numpy opencv-python torch
-```
-
-There are no automated tests in the repository currently; visual verification (example input -> node -> compare output) is the primary validation method.
+Maintainer: yanan.zhu@gmail.com
+Repo: https://github.com/zhuyanan/Comfy-FilmSimulator
 
 ---
 
 ## License
 
-This repository contains a `LICENSE` file — please refer to it for terms. (The repo includes a LICENSE in the root.)
-
----
-
-## Attribution & Contact
-
-Maintainer: yanan.zhu@gmail.com  
-Repo: https://github.com/zhuyanan/Comfy-FilmSimulator
-
+This repository contains a `LICENSE` file — please refer to it for terms.
