@@ -29,9 +29,6 @@ class DNGImageReader:
         Estimate approximate Kelvin temperature from RGB multipliers.
         """
         try:
-            # Simple heuristic mapping
-            # High R/B ratio -> Low K (Warm)
-            # Low R/B ratio -> High K (Cool)
             if b_gain == 0: return 0
             ratio = r_gain / b_gain
             k = 10000 / math.sqrt(ratio) * 0.6
@@ -41,22 +38,16 @@ class DNGImageReader:
 
     def read_dng(self, dng_path, linear_output, wb_mode, target_max_exposure):
         if not os.path.exists(dng_path):
-            raise FileNotFoundError(f"DNG file not found: {dng_path}")
+            # In ComfyUI, we sometimes prefer returning empty instead of crashing
+            print(f"[DNG Reader Error] File not found: {dng_path}")
+            empty = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
+            return (empty, f"Error: File not found: {dng_path}")
         
         try:
             with rawpy.imread(dng_path) as raw:
-                # --- 1. Metadata Extraction (Safe Mode) ---
-                # Fixed: Removed 'camera_make' which caused the crash.
-                # raw.model usually contains the camera name.
-                try:
-                    camera_model = raw.model.decode('utf-8') if raw.model else "Unknown Camera"
-                except:
-                    camera_model = "Unknown Camera"
-
-                # --- 2. White Balance Logic ---
+                # --- 1. White Balance Logic ---
                 try:
                     camera_wb = list(raw.camera_whitebalance)
-                    # Normalize to Green=1.0 for estimation
                     g_val = (camera_wb[1] + camera_wb[3]) / 2.0
                     if g_val > 0:
                         as_shot_r = camera_wb[0] / g_val
@@ -82,14 +73,14 @@ class DNGImageReader:
                 elif wb_mode == "None (Raw Sensor)":
                     user_wb = [1.0, 1.0, 1.0, 1.0] 
                 else:
-                    # Presets
+                    wb_info_str = f"Preset: {wb_mode}"
                     if wb_mode.startswith("Daylight"):
                         user_wb = list(raw.daylight_whitebalance) if hasattr(raw, 'daylight_whitebalance') and raw.daylight_whitebalance else [2.0, 1.0, 1.5, 1.0]
                     elif wb_mode.startswith("Tungsten"): user_wb = [1.5, 1.0, 2.5, 1.0]
                     elif wb_mode.startswith("Fluorescent"): user_wb = [1.8, 1.0, 2.2, 1.0]
                     elif wb_mode.startswith("Flash"): user_wb = [2.2, 1.0, 1.4, 1.0]
 
-                # --- 3. Demosaicing (Decoding) ---
+                # --- 2. Demosaicing (Decoding) ---
                 white_level = raw.white_level
                 if white_level == 0: white_level = 65535.0
 
@@ -110,12 +101,9 @@ class DNGImageReader:
 
                 rgb_image = raw.postprocess(**params)
                 
-                # --- 4. Normalization (Float32) ---
+                # --- 3. Normalization (Float32) ---
                 image_array = rgb_image.astype(np.float32)
-                
-                # Target Max Exposure: 0.5 leaves headroom for highlights
                 image_array = image_array / white_level * target_max_exposure
-                
                 image_array = np.clip(image_array, 0.0, None)
                 
                 if len(image_array.shape) == 2:
@@ -123,13 +111,10 @@ class DNGImageReader:
                 
                 image_tensor = torch.from_numpy(image_array).unsqueeze(0)
                 
-                # Metadata String
-                metadata = f"File: {os.path.basename(dng_path)}\n"
-                metadata += f"Camera: {camera_model}\n"
-                metadata += f"WB: {wb_info_str}\n"
-                metadata += f"Exposure Gain: {target_max_exposure}x (Sensor Clip @ {target_max_exposure})"
+                # --- 4. Metadata Extraction ---
+                metadata = self.extract_metadata(raw, dng_path, wb_info_str, target_max_exposure, linear_output)
                 
-                print(f"[SmartHDR] Loaded DNG: {camera_model}. Gain: {target_max_exposure}")
+                print(f"[SmartHDR] Loaded DNG: {os.path.basename(dng_path)}. Gain: {target_max_exposure}")
                 
                 return (image_tensor, metadata)
                 
@@ -137,3 +122,55 @@ class DNGImageReader:
             print(f"[DNG Reader Error] {e}")
             empty = torch.zeros((1, 512, 512, 3), dtype=torch.float32)
             return (empty, f"Error: {str(e)}")
+
+    def extract_metadata(self, raw, dng_path, wb_info_str, target_max_exposure, linear_output):
+        try:
+            sizes = raw.sizes
+            width = sizes.width
+            height = sizes.height
+
+            filters = getattr(sizes, 'filters', None)
+            if filters is not None:
+                if filters == 0: bayer_pattern_str = "No filter (Monochrome)"
+                elif filters == 9: bayer_pattern_str = "RGGB"
+                elif filters == 273: bayer_pattern_str = "GRBG"
+                elif filters == 1536: bayer_pattern_str = "BGGR"
+                elif filters == 6144: bayer_pattern_str = "GBRG"
+                else: bayer_pattern_str = f"Unknown ({filters})"
+            else:
+                bayer_pattern_str = "Unknown"
+
+            color_desc = raw.color_desc.decode('utf-8') if hasattr(raw.color_desc, 'decode') else str(raw.color_desc)
+
+            try:
+                camera_model = raw.model.decode('utf-8') if hasattr(raw, 'model') and raw.model else 'Unknown'
+            except:
+                camera_model = 'Unknown'
+
+            try:
+                camera_make = raw.camera_make.decode('utf-8') if hasattr(raw, 'camera_make') and raw.camera_make else 'Unknown'
+            except:
+                camera_make = 'Unknown'
+
+            metadata_str = f"""File: {os.path.basename(dng_path)}
+Width: {width}
+Height: {height}
+Camera: {camera_model}
+Camera Maker: {camera_make}
+Bayer Pattern: {bayer_pattern_str}
+Color Description: {color_desc}
+WB: {wb_info_str}
+Exposure Gain: {target_max_exposure}x
+Linear Output Mode: {'Enabled' if linear_output else 'Disabled'}"""
+
+            try:
+                black_level = getattr(raw, 'black_level', 'Unknown')
+                metadata_str += f"\nBlack Level: {black_level}"
+                white_level = getattr(raw, 'white_level', 'Unknown')
+                metadata_str += f"\nWhite Level: {white_level}"
+            except:
+                pass
+
+            return metadata_str
+        except Exception as e:
+            return f"Error extracting metadata: {str(e)}"
