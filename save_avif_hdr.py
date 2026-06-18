@@ -135,6 +135,18 @@ class SaveAVIF_HDR:
                 img_16bit = (clipped * 65535.0).round().astype(np.uint16)
                 img_16bit = np.ascontiguousarray(img_16bit)
 
+                # Compute HDR metadata (maxCLL, maxFALL) from luminance (nits)
+                try:
+                    maxcll = int(np.ceil(np.max(nits)))
+                    # Use the mean of pixel nits as frame-average (robust: use 99th percentile of per-frame averages if multi-frame)
+                    maxfall = int(np.ceil(np.mean(nits)))
+                    # clamp to reasonable HEIF limits
+                    maxcll = int(np.clip(maxcll, 0, 10000))
+                    maxfall = int(np.clip(maxfall, 0, 10000))
+                except Exception:
+                    maxcll = None
+                    maxfall = None
+
                 # pillow_heif.from_bytes expects raw bytes. Use .tobytes() which is well-defined.
                 # The mode 'RGB;16' indicates 16-bit per channel; size is (width, height)
                 heif_file = None
@@ -177,15 +189,28 @@ class SaveAVIF_HDR:
 
                 # Save with guarded params; pillow_heif.save can raise
                 try:
-                    heif_file.save(f_path, quality=int(quality),
-                                   bit_depth=10,
-                                   color_primaries=9,
-                                   transfer_characteristics=16,
-                                   matrix_coefficients=9,
-                                   full_range_flag=True)
+                    save_kwargs = dict(
+                        quality=int(quality),
+                        bit_depth=10,
+                        color_primaries=9,
+                        transfer_characteristics=16,
+                        matrix_coefficients=9,
+                        full_range_flag=True,
+                    )
+                    # include HDR metadata if computed
+                    if maxcll is not None:
+                        save_kwargs["maxcll"] = int(maxcll)
+                    if maxfall is not None:
+                        save_kwargs["maxfall"] = int(maxfall)
+
+                    heif_file.save(f_path, **save_kwargs)
                 except TypeError:
                     # some pillow_heif versions may not accept the same kwargs; try without extras
-                    heif_file.save(f_path, quality=int(quality))
+                    try:
+                        heif_file.save(f_path, quality=int(quality))
+                    except Exception as e:
+                        print(f"[SaveAVIF_HDR] Save failed for {f_path}: {e}")
+                        continue
                 except Exception as e:
                     print(f"[SaveAVIF_HDR] Save failed for {f_path}: {e}")
                     continue
