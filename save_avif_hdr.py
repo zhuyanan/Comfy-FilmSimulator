@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import os
 import folder_paths
+import sys
 
 HAS_HEIF = False
 try:
@@ -103,12 +104,20 @@ class SaveAVIF_HDR:
                 # If image shape is HxWx3, np.dot with m_2020.T gives HxWx3
                 img_rec2020 = np.dot(img_np, m_2020.T).astype(np.float32)
 
+                # Basic input range check: warn if values look like they're already in absolute nits
+                max_val = float(np.max(img_rec2020)) if img_rec2020.size else 0.0
+                if max_val > 1.5:
+                    print(f"[SaveAVIF_HDR] WARNING: max Rec.2020 value {max_val:.3f} > 1.5 — input may already be in scene luminance units (nits). Ensure ref_white_nits is correct to avoid over/under exposure in PQ mapping.")
+
                 # PQ mapping: map scene-referred values (relative to ref_white_nits) to PQ normalized range
+                # The node expects scene-referred linear values where 1.0 corresponds to '1 unit' and
+                # `ref_white_nits` describes the mapping to absolute luminance for PQ encoding.
                 nits = img_rec2020 * float(ref_white_nits)
                 nits = np.clip(nits, 0.0, 10000.0)
                 y = nits / 10000.0
 
-                # SMPTE ST 2084 constants (approx)
+                # SMPTE ST 2084 constants (m1/m2/c1/c2/c3) per standard - used for PQ EOTF
+                # Reference: SMPTE ST 2084 (Perceptual Quantizer) constants
                 m1, m2 = 0.1593017578125, 78.84375
                 c1, c2, c3 = 0.8359375, 18.8515625, 18.623046875
 
@@ -128,6 +137,7 @@ class SaveAVIF_HDR:
 
                 # pillow_heif.from_bytes expects raw bytes. Use .tobytes() which is well-defined.
                 # The mode 'RGB;16' indicates 16-bit per channel; size is (width, height)
+                heif_file = None
                 try:
                     heif_file = pillow_heif.from_bytes(
                         mode="RGB;16",
@@ -135,19 +145,32 @@ class SaveAVIF_HDR:
                         data=img_16bit.tobytes()
                     )
                 except Exception as e:
-                    print(f"[SaveAVIF_HDR] pillow_heif.from_bytes failed: {e}")
-                    # try a fallback: convert to 8-bit (lossy) to ensure at least something is saved
+                    # Some systems or pillow_heif builds may expect a different endian ordering for 16-bit.
+                    # Try byteswapped 16-bit data before falling back to 8-bit.
+                    print(f"[SaveAVIF_HDR] pillow_heif.from_bytes (native 16-bit) failed: {e}")
                     try:
-                        img_8bit = (clipped * 255.0).round().astype(np.uint8)
-                        img_8bit = np.ascontiguousarray(img_8bit)
+                        swapped = img_16bit.byteswap().tobytes()
                         heif_file = pillow_heif.from_bytes(
-                            mode="RGB",
-                            size=(img_8bit.shape[1], img_8bit.shape[0]),
-                            data=img_8bit.tobytes()
+                            mode="RGB;16",
+                            size=(img_16bit.shape[1], img_16bit.shape[0]),
+                            data=swapped
                         )
+                        print("[SaveAVIF_HDR] Used byteswapped 16-bit data as a fallback for pillow_heif.from_bytes.")
                     except Exception as e2:
-                        print(f"[SaveAVIF_HDR] fallback to 8-bit also failed: {e2}")
-                        continue
+                        print(f"[SaveAVIF_HDR] pillow_heif.from_bytes (byteswapped) also failed: {e2}")
+                        # try a fallback: convert to 8-bit (lossy) to ensure at least something is saved
+                        try:
+                            img_8bit = (clipped * 255.0).round().astype(np.uint8)
+                            img_8bit = np.ascontiguousarray(img_8bit)
+                            heif_file = pillow_heif.from_bytes(
+                                mode="RGB",
+                                size=(img_8bit.shape[1], img_8bit.shape[0]),
+                                data=img_8bit.tobytes()
+                            )
+                            print("[SaveAVIF_HDR] WARNING: Falling back to 8-bit (SDR) due to 16-bit encoding limitations.")
+                        except Exception as e3:
+                            print(f"[SaveAVIF_HDR] fallback to 8-bit also failed: {e3}")
+                            continue
 
                 ext = ".avif" if format == "AVIF" else ".heic"
                 f_path = os.path.join(full_output_folder, f"{filename}_{counter:05}{ext}")
