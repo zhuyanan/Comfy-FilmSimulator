@@ -1,30 +1,35 @@
+# Comfy Film Simulator
+
+A small toolkit and pipeline for applying film simulation to RAW/DNG images, producing both HDR and SDR outputs and optionally saving them in modern formats (AVIF/HEIC) with HDR metadata.
+
 ---
-## End-to-end pipeline: RAW -> Film -> Save SDR/HDR
 
-This repository now includes a convenience pipeline node and helper nodes that make it easy to run the full workflow from a single node or chain the steps manually.
+## End-to-end pipeline (RAW → Film → Save)
 
-Nodes you can use
+This repository includes a convenient Film Pipeline node and helper nodes that make it easy to run the full workflow from a single node or chain the steps manually.
 
-- `DNG Image Reader` — Load a DNG/RAW file (linear HDR output supported).
-- `Film Simulation V4.1 (HDR Capable)` — Apply film simulation in a linear HDR workflow and generate both HDR frames and an SDR preview.
+### Key nodes
+
+- `DNG Image Reader` — Load a DNG/RAW file (supports linear HDR output).
+- `Film Simulation V4.1 (HDR Capable)` — Apply film simulation in a linear HDR workflow and generate an HDR image plus an SDR preview.
 - `HDR Merge (Gainmap)` — Compute a smooth gainmap from an SDR/HDR pair and merge to produce a final HDR image suitable for AVIF/HEIC export.
-- `Save SDR Preview (PNG/JPEG)` — Save the SDR preview (performs linear -> sRGB gamma if requested).
+- `Save SDR Preview (PNG/JPEG)` — Save the SDR preview (performs linear → sRGB conversion when requested).
 - `Save AVIF/HEIC HDR (Native)` — Save PQ-encoded AVIF/HEIC using Rec.2020 primaries and optional HDR metadata.
-- `Film Pipeline (RAW -> Film -> Save)` — One-node orchestration that reads RAW, applies film simulation, optionally merges SDR+HDR, and saves SDR/HDR files.
+- `Film Pipeline (RAW → Film → Save)` — One-node orchestration that reads RAW, applies film simulation, optionally merges SDR+HDR, and saves SDR/HDR files.
 
-Typical interactive workflows
+## Typical interactive workflows
 
 - Manual (node graph):
-  - `DNG Image Reader` -> `Film Simulation V4.1 (HDR Capable)` ->
-    - connect `preview_sdr` -> `Save SDR Preview (PNG/JPEG)`
-    - connect `hdr_image` -> `HDR Merge (Gainmap)` (optional) -> `Save AVIF/HEIC HDR (Native)`
+  - `DNG Image Reader` → `Film Simulation V4.1 (HDR Capable)` →
+    - connect `preview_sdr` → `Save SDR Preview (PNG/JPEG)`
+    - connect `hdr_image` → `HDR Merge (Gainmap)` (optional) → `Save AVIF/HEIC HDR (Native)`
 
 - One-click (single node):
-  - `Film Pipeline (RAW -> Film -> Save)` — set `dng_path` or supply an image tensor, configure film and merge parameters, and enable `save_sdr` / `save_hdr` as needed.
+  - `Film Pipeline (RAW → Film → Save)` — set `dng_path` or supply an image tensor, configure film and merge parameters, and enable `save_sdr` / `save_hdr` as needed.
 
-Usage example (programmatic)
+## Programmatic usage example
 
-Below is an example of how to call the FilmPipelineNode programmatically (this is a simplified outline; adjust paths and parameters to your setup):
+Below is an example of how to call the FilmPipelineNode programmatically (adjust paths and parameters to your setup):
 
 ```python
 from comfy_film_simulator.film_pipeline import FilmPipelineNode
@@ -64,15 +69,15 @@ hdr_out, sdr_preview, gainmap_vis, info = pipeline.run_pipeline(
 print(info)
 ```
 
-Notes & recommendations
+## Notes & recommendations
 
-- Guided filter (edge-aware smoothing) is used by default for HDR merging when available (OpenCV contrib's ximgproc guidedFilter). If not available the pipeline falls back to Gaussian smoothing.
-- The pipeline assumes linear scene-referred inputs for HDR processing. The SDR preview and SaveSDR node convert to sRGB for display when requested.
-- For HDR export install `pillow-heif` and for guided filtering install `opencv-contrib-python` if you want edge-aware merging.
+- Guided filter (edge-aware smoothing) is used by default for HDR merging when available (OpenCV contrib's `ximgproc.guidedFilter`). If that package is not available, the pipeline falls back to Gaussian smoothing.
+- The pipeline expects linear, scene-referred inputs for HDR processing. The SDR preview and Save SDR node will convert to sRGB for display when requested.
+- For HDR export, install `pillow-heif` (to enable HEIF/AVIF saving with Pillow). For guided filtering, install `opencv-contrib-python` to get the `ximgproc` module if you want edge-aware merging.
 
-Attribution
+## Attribution
 
-The HDR merge and pipeline nodes were designed with conceptual inspiration from the following projects. This repository does not copy code verbatim from them; the implementations here are original and adapted for ComfyUI.
+The HDR merge and pipeline nodes were conceptually inspired by the projects below. This repository does not copy code verbatim from them; the implementations here are original and borrow only conceptual ideas.
 
 - https://github.com/jb-jrdn/Hdr-Gainmap
 - https://github.com/zidage/AlcedoStudio
